@@ -26,7 +26,7 @@ const char* pass = "0987654321";
 // ==========================================
 // REPLACE "192.168.X.X" with your actual laptop local IPv4 address.
 // Example: "http://192.168.1.100:5000/update"
-const char* flaskServerUrl = "http://<YOUR_LAPTOP_IP_HERE>:5000/update";
+const char* flaskServerUrl = "http://10.219.31.245:5000/update";
 
 // Hardware PIN Definitions
 #define MQ135_PIN 35      // MQ-135 Gas Sensor (Analog ADC1)
@@ -92,10 +92,22 @@ void setup() {
     display.display();
   }
 
-  // Connect to Wi-Fi (non-blocking begin)
+  // Connect to Wi-Fi (blocking loop for diagnostics)
   Serial.print("Connecting to Wi-Fi network: ");
   Serial.println(ssid);
   WiFi.begin(ssid, pass);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("WiFi Connected!");
+  Serial.print("ESP IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.print("Gateway: ");
+  Serial.println(WiFi.gatewayIP());
 }
 
 void loop() {
@@ -177,6 +189,12 @@ void loop() {
 void sendTelemetry() {
   HTTPClient http;
   
+  // Connection diagnostics
+  Serial.print("Connected: ");
+  Serial.println(WiFi.status() == WL_CONNECTED);
+  Serial.print("Server: ");
+  Serial.println(flaskServerUrl);
+
   // Initialize connection to flask server
   http.begin(flaskServerUrl);
   http.addHeader("Content-Type", "application/json");
@@ -194,13 +212,11 @@ void sendTelemetry() {
   int httpResponseCode = http.POST(requestBody);
 
   if (httpResponseCode > 0) {
+    Serial.printf("HTTP Code: %d\n", httpResponseCode);
     String response = http.getString();
-    Serial.print("Telemetry Sent. Response Code: ");
-    Serial.println(httpResponseCode);
     Serial.println(response);
   } else {
-    Serial.print("Error sending HTTP POST. Code: ");
-    Serial.println(http.errorToString(httpResponseCode).c_str());
+    Serial.printf("HTTP Error: %s\n", http.errorToString(httpResponseCode).c_str());
   }
 
   http.end();
