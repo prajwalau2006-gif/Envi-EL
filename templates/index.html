@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Premium IoT Air Quality Monitor</title>
+    <!-- Google Fonts (Poppins & Outfit for UI metrics) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom Style Sheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header Section -->
+        <header class="dashboard-header">
+            <div class="header-title">
+                <h1>AeroGuard <span class="badge">IoT</span></h1>
+                <p>Local Air Quality Monitoring System</p>
+            </div>
+            <div class="connection-status">
+                <span class="status-indicator live" id="connection-dot"></span>
+                <span id="connection-text">Live Connection</span>
+            </div>
+        </header>
+
+        <!-- Dynamic Air Condition Alert Banner -->
+        <section id="alert-banner" class="alert-banner safe-zone">
+            <div class="alert-icon">
+                <i id="alert-icon-i" class="fa-solid fa-circle-check"></i>
+            </div>
+            <div class="alert-content">
+                <h2 id="alert-title">[SAFE ZONE] Nominal Conditions</h2>
+                <p id="alert-description">PPM level is within clean, healthy parameters.</p>
+            </div>
+        </section>
+
+        <!-- Main Dashboard Grid -->
+        <main class="dashboard-grid">
+            <!-- Gauge Card -->
+            <div class="card gauge-card">
+                <h3>Gas Concentration</h3>
+                <div class="gauge-wrapper">
+                    <svg class="gauge-svg" viewBox="0 0 100 100">
+                        <!-- Background Circle -->
+                        <circle class="gauge-bg" cx="50" cy="50" r="42"></circle>
+                        <!-- Dynamic Foreground Circle -->
+                        <circle class="gauge-value" id="gauge-ring" cx="50" cy="50" r="42"></circle>
+                    </svg>
+                    <div class="gauge-text">
+                        <span id="ppm-display" class="ppm-value">0</span>
+                        <span class="ppm-unit">PPM</span>
+                    </div>
+                </div>
+                <div class="gauge-limits">
+                    <span>0 PPM</span>
+                    <span>1500+ PPM</span>
+                </div>
+            </div>
+
+            <!-- Exhaust Fan Card -->
+            <div class="card status-card" id="fan-card">
+                <div class="card-icon-wrapper">
+                    <i id="fan-icon" class="fa-solid fa-fan icon-fan"></i>
+                </div>
+                <div class="card-details">
+                    <h4>Exhaust Fan Status</h4>
+                    <span id="fan-status" class="status-label text-muted">OFF</span>
+                </div>
+            </div>
+
+            <!-- Buzzer Alarm Card -->
+            <div class="card status-card" id="buzzer-card">
+                <div class="card-icon-wrapper">
+                    <i id="buzzer-icon" class="fa-solid fa-bell icon-buzzer"></i>
+                </div>
+                <div class="card-details">
+                    <h4>Buzzer Alarm Status</h4>
+                    <span id="buzzer-status" class="status-label text-muted">OFF</span>
+                </div>
+            </div>
+        </main>
+
+        <!-- Info / Diagnostic Footer -->
+        <footer class="dashboard-footer">
+            <p><i class="fa-solid fa-wifi"></i> Webhook Server running locally at port <strong style="color: var(--accent-color);">5000</strong></p>
+            <p>Last Sync: <span id="last-sync-time" class="timestamp">Never</span></p>
+        </footer>
+    </div>
+
+    <!-- Frontend logic for auto-polling data -->
+    <script>
+        // DOM Elements
+        const ppmDisplay = document.getElementById("ppm-display");
+        const gaugeRing = document.getElementById("gauge-ring");
+        const alertBanner = document.getElementById("alert-banner");
+        const alertTitle = document.getElementById("alert-title");
+        const alertDescription = document.getElementById("alert-description");
+        const alertIconI = document.getElementById("alert-icon-i");
+        
+        const fanCard = document.getElementById("fan-card");
+        const fanStatus = document.getElementById("fan-status");
+        const fanIcon = document.getElementById("fan-icon");
+        
+        const buzzerCard = document.getElementById("buzzer-card");
+        const buzzerStatus = document.getElementById("buzzer-status");
+        const buzzerIcon = document.getElementById("buzzer-icon");
+        
+        const lastSyncTime = document.getElementById("last-sync-time");
+        const connectionDot = document.getElementById("connection-dot");
+        const connectionText = document.getElementById("connection-text");
+
+        // SVG Gauge parameters
+        // Circumference of radius 42 circle is 2 * PI * 42 = ~263.89
+        const circumference = 2 * Math.PI * 42;
+        gaugeRing.style.strokeDasharray = circumference;
+        
+        // Update circular gauge
+        function updateGauge(ppm) {
+            // Cap visual limit at 1500 PPM
+            const maxPPM = 1500;
+            const percentage = Math.min(100, (ppm / maxPPM) * 100);
+            const offset = circumference - (percentage / 100) * circumference;
+            gaugeRing.style.strokeDashoffset = offset;
+        }
+
+        // Fetch metrics function
+        async function fetchMetrics() {
+            try {
+                const response = await fetch("/data");
+                if (!response.ok) throw new Error("Network response error");
+                const data = await response.json();
+
+                // 1. Update text displays
+                ppmDisplay.innerText = data.ppm;
+                updateGauge(data.ppm);
+
+                // 2. Set Connection Status to active
+                connectionDot.className = "status-indicator live";
+                connectionText.innerText = "Live Connection";
+
+                // 3. Dynamic Air Quality Alert Banner styling
+                if (data.ppm < 400) {
+                    alertBanner.className = "alert-banner safe-zone";
+                    alertTitle.innerText = "[SAFE ZONE] Nominal Conditions";
+                    alertDescription.innerText = "PPM level is within clean, healthy parameters.";
+                    alertIconI.className = "fa-solid fa-circle-check";
+                    // Color the gauge ring Emerald
+                    gaugeRing.style.stroke = "var(--emerald-green)";
+                } else if (data.ppm >= 400 && data.ppm <= 800) {
+                    alertBanner.className = "alert-banner warning-zone";
+                    alertTitle.innerText = "[WARNING ZONE] Elevated Concentrations";
+                    alertDescription.innerText = "Moderate air contamination detected. Increase ventilation.";
+                    alertIconI.className = "fa-solid fa-circle-exclamation";
+                    // Color the gauge ring Amber
+                    gaugeRing.style.stroke = "var(--amber-yellow)";
+                } else {
+                    alertBanner.className = "alert-banner critical-zone";
+                    alertTitle.innerText = "[CRITICAL ZONE] Emergency System Active";
+                    alertDescription.innerText = "Hazardous gas concentrations! Exhaust systems triggered.";
+                    alertIconI.className = "fa-solid fa-triangle-exclamation";
+                    // Color the gauge ring Crimson Red
+                    gaugeRing.style.stroke = "var(--crimson-red)";
+                }
+
+                // 4. Exhaust Fan Status styling
+                if (data.fan === "ON") {
+                    fanStatus.innerText = "ON";
+                    fanStatus.className = "status-label status-active-fan";
+                    fanCard.classList.add("active-fan");
+                    fanIcon.classList.add("spin-active");
+                } else {
+                    fanStatus.innerText = "OFF";
+                    fanStatus.className = "status-label text-muted";
+                    fanCard.classList.remove("active-fan");
+                    fanIcon.classList.remove("spin-active");
+                }
+
+                // 5. Buzzer Alarm Status styling
+                if (data.buzzer === "ON") {
+                    buzzerStatus.innerText = "ON";
+                    buzzerStatus.className = "status-label status-active-buzzer";
+                    buzzerCard.classList.add("active-buzzer");
+                    buzzerIcon.classList.add("shake-active");
+                } else {
+                    buzzerStatus.innerText = "OFF";
+                    buzzerStatus.className = "status-label text-muted";
+                    buzzerCard.classList.remove("active-buzzer");
+                    buzzerIcon.classList.remove("shake-active");
+                }
+
+                // 6. Update Sync timestamp
+                const now = new Date();
+                lastSyncTime.innerText = now.toLocaleTimeString();
+
+            } catch (error) {
+                console.error("Error fetching metrics:", error);
+                // Update header connection indicator to signal disconnected state
+                connectionDot.className = "status-indicator disconnected";
+                connectionText.innerText = "Disconnected";
+            }
+        }
+
+        // Set Interval for auto-polling every 1 second
+        setInterval(fetchMetrics, 1000);
+        // Execute immediately on load
+        fetchMetrics();
+    </script>
+</body>
+</html>
