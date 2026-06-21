@@ -10,6 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- ChartJS for live trend visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <!-- Custom Style Sheet -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -82,12 +84,37 @@
                     <span id="buzzer-status" class="status-label text-muted">OFF</span>
                 </div>
             </div>
+
+            <!-- System Telemetry Card -->
+            <div class="card info-card" id="system-card">
+                <h3>System Telemetry</h3>
+                <ul class="system-list">
+                    <li><span>Voltage</span><strong id="voltage-value">0.00 V</strong></li>
+                    <li><span>Signal Strength</span><strong id="signal-value">-100 dBm</strong></li>
+                    <li><span>Device Uptime</span><strong id="uptime-value">00:00:00</strong></li>
+                    <li><span>Device Status</span><strong id="device-status-value">Idle</strong></li>
+                </ul>
+            </div>
+
+            <!-- Live Trend Chart Card -->
+            <div class="card chart-card">
+                <h3>PPM Trend (Last 20 samples)</h3>
+                <div class="chart-wrapper">
+                    <canvas id="ppm-history-chart"></canvas>
+                </div>
+                <div class="chart-legend">
+                    <span><i class="legend-dot safe"></i> Safe &lt; 400</span>
+                    <span><i class="legend-dot warning"></i> Warning 400–800</span>
+                    <span><i class="legend-dot critical"></i> Critical &gt; 800</span>
+                </div>
+            </div>
         </main>
 
         <!-- Info / Diagnostic Footer -->
         <footer class="dashboard-footer">
-            <p><i class="fa-solid fa-wifi"></i> Webhook Server running locally at port <strong style="color: var(--accent-color);">5000</strong></p>
-            <p>Last Sync: <span id="last-sync-time" class="timestamp">Never</span></p>
+            <p><i class="fa-solid fa-wifi"></i> Server Port <strong class="footer-highlight">5000</strong></p>
+            <p><i class="fa-solid fa-microchip"></i> Device Status: <strong id="footer-device-status" class="timestamp">Idle</strong></p>
+            <p><i class="fa-solid fa-clock"></i> Last Sync: <span id="last-sync-time" class="timestamp">Never</span></p>
         </footer>
     </div>
 
@@ -109,9 +136,68 @@
         const buzzerStatus = document.getElementById("buzzer-status");
         const buzzerIcon = document.getElementById("buzzer-icon");
         
+        const voltageValue = document.getElementById("voltage-value");
+        const signalValue = document.getElementById("signal-value");
+        const uptimeValue = document.getElementById("uptime-value");
+        const deviceStatusValue = document.getElementById("device-status-value");
+        const footerDeviceStatus = document.getElementById("footer-device-status");
         const lastSyncTime = document.getElementById("last-sync-time");
         const connectionDot = document.getElementById("connection-dot");
         const connectionText = document.getElementById("connection-text");
+        const ppmHistoryCanvas = document.getElementById("ppm-history-chart");
+
+        const ppmHistory = [];
+        const ppmLabels = [];
+
+        const ppmTrendChart = new Chart(ppmHistoryCanvas.getContext("2d"), {
+            type: "line",
+            data: {
+                labels: ppmLabels,
+                datasets: [{
+                    label: "PPM",
+                    data: ppmHistory,
+                    borderColor: "#38bdf8",
+                    backgroundColor: "rgba(56, 189, 248, 0.18)",
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        grid: { color: "rgba(255,255,255,0.05)" },
+                        ticks: { color: "var(--text-secondary)", maxRotation: 0, autoSkip: true }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        max: 1500,
+                        grid: { color: "rgba(255,255,255,0.05)" },
+                        ticks: { color: "var(--text-secondary)" }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        mode: "index",
+                        intersect: false,
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.dataset.label}: ${context.parsed.y} PPM`;
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: "nearest",
+                    intersect: false
+                }
+            }
+        });
 
         // SVG Gauge parameters
         // Circumference of radius 42 circle is 2 * PI * 42 = ~263.89
@@ -130,9 +216,15 @@
         // Fetch metrics function
         async function fetchMetrics() {
             try {
-                const response = await fetch("/data");
+                const response = await fetch(`/data?ts=${Date.now()}`, { cache: "no-store" });
+                console.log("[Dashboard] /data response:", {
+                    status: response.status,
+                    ok: response.ok,
+                    url: response.url
+                });
                 if (!response.ok) throw new Error("Network response error");
                 const data = await response.json();
+                console.log("[Dashboard] /data payload:", data);
 
                 // 1. Update text displays
                 ppmDisplay.innerText = data.ppm;
@@ -192,12 +284,28 @@
                     buzzerIcon.classList.remove("shake-active");
                 }
 
-                // 6. Update Sync timestamp
+                // 6. Populate additional telemetry panels
+                voltageValue.innerText = `${data.voltage_v.toFixed(2)} V`;
+                signalValue.innerText = `${data.signal_dbm} dBm`;
+                uptimeValue.innerText = data.uptime;
+                deviceStatusValue.innerText = data.device_status;
+                footerDeviceStatus.innerText = data.device_status;
+
+                // 7. Update chart history
+                ppmLabels.push(new Date().toLocaleTimeString());
+                ppmHistory.push(data.ppm);
+                if (ppmHistory.length > 20) {
+                    ppmHistory.shift();
+                    ppmLabels.shift();
+                }
+                ppmTrendChart.update();
+
+                // 8. Update Sync timestamp
                 const now = new Date();
                 lastSyncTime.innerText = now.toLocaleTimeString();
 
             } catch (error) {
-                console.error("Error fetching metrics:", error);
+                console.error("[Dashboard] Error fetching metrics:", error);
                 // Update header connection indicator to signal disconnected state
                 connectionDot.className = "status-indicator disconnected";
                 connectionText.innerText = "Disconnected";
